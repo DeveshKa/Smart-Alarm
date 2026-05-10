@@ -11,7 +11,8 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
+class _GamePageState extends State<GamePage>
+    with SingleTickerProviderStateMixin {
   List<String> availableBalls = [];
   List<String?> placedLetters = List.filled(10, null);
   int score = 0;
@@ -25,6 +26,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   late final AnimationController _shotController;
   Animation<Offset>? _shotAnimation;
   String? _movingLetter;
+  int? _landingIndex;
   Size? _playSize;
 
   @override
@@ -53,7 +55,22 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   void _generateBalls() {
     final weightedLetters = <String>[];
     // Very common letters (x4)
-    const veryCommon = ['E', 'T', 'A', 'O', 'I', 'N', 'S', 'H', 'R', 'D', 'L', 'C', 'U', 'M'];
+    const veryCommon = [
+      'E',
+      'T',
+      'A',
+      'O',
+      'I',
+      'N',
+      'S',
+      'H',
+      'R',
+      'D',
+      'L',
+      'C',
+      'U',
+      'M'
+    ];
     for (final letter in veryCommon) {
       weightedLetters.addAll(List.filled(4, letter));
     }
@@ -71,7 +88,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       weightedLetters.addAll(List.filled(4, vowel));
     }
     final random = Random();
-    availableBalls = List.generate(10, (_) => weightedLetters[random.nextInt(weightedLetters.length)]);
+    availableBalls = List.generate(
+        10, (_) => weightedLetters[random.nextInt(weightedLetters.length)]);
   }
 
   void _resetGame() {
@@ -93,7 +111,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     if (isAnimating || gameOver) return;
     setState(() {
       selectedBallIndex = index;
-      lastWordMessage = 'Aiming ${availableBalls[index]} - drag on the field to shoot.';
+      lastWordMessage =
+          'Aiming ${availableBalls[index]} - drag on the field to shoot.';
     });
   }
 
@@ -117,7 +136,19 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   }
 
   void _shootSelectedBall() {
-    if (selectedBallIndex < 0 || aimTarget == null || isAnimating || gameOver) return;
+    if (selectedBallIndex < 0 || aimTarget == null || isAnimating || gameOver)
+      return;
+
+    if (_playSize == null || aimTarget == null) return;
+
+    final targetIndex = _slotIndexForOffset(aimTarget!, _playSize!);
+    final landingIndex = _chooseLandingIndex(targetIndex);
+    if (landingIndex == null) {
+      setState(() {
+        lastWordMessage = 'No empty target slots available.';
+      });
+      return;
+    }
 
     final letter = availableBalls.removeAt(selectedBallIndex);
     selectedBallIndex = -1;
@@ -125,9 +156,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     setState(() {
       roundsLeft = max(0, roundsLeft - 1);
       lastWordMessage = 'Shooting $letter...';
+      _movingLetter = letter;
+      _landingIndex = landingIndex;
+      aimTarget = _slotCenter(_landingIndex!, _playSize!);
     });
 
-    _movingLetter = letter;
     _shotAnimation = Tween<Offset>(begin: _launcherPosition, end: aimTarget!)
         .chain(CurveTween(curve: Curves.easeOut))
         .animate(_shotController);
@@ -137,19 +170,16 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
   void _finishShot() {
     setState(() {
-      if (_movingLetter != null && aimTarget != null && _playSize != null) {
-        final boxWidth = _playSize!.width / 10;
-        final boxIndex = ((aimTarget!.dx / boxWidth) - 0.5).round().clamp(0, 9);
-        if (placedLetters[boxIndex] == null) {
-          placedLetters[boxIndex] = _movingLetter;
-          _checkForWord();
-        }
+      if (_movingLetter != null && _landingIndex != null) {
+        placedLetters[_landingIndex!] = _movingLetter;
+        _checkForWord();
       }
       isAnimating = false;
       isAiming = false;
       aimTarget = null;
       _shotAnimation = null;
       _movingLetter = null;
+      _landingIndex = null;
       if (availableBalls.isEmpty && !gameOver) {
         _generateBalls();
       }
@@ -157,32 +187,31 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   }
 
   void _checkForWord() {
-    final currentLetters = placedLetters.where((l) => l != null).map((l) => l!).toList();
     String message = 'Keep shooting to form a valid word.';
+
     for (int len = 6; len >= 2; len--) {
-      if (currentLetters.length >= len) {
-        final word = currentLetters.sublist(currentLetters.length - len).join().toLowerCase();
+      for (int start = 0; start <= 10 - len; start++) {
+        final slice = placedLetters.sublist(start, start + len);
+        if (slice.any((letter) => letter == null)) continue;
+        final word = slice.join().toLowerCase();
         if (dictionary.contains(word)) {
           final points = getScore(len);
           score += points;
-          // Remove the last len letters
-          for (int i = placedLetters.length - 1; i >= 0 && len > 0; i--) {
-            if (placedLetters[i] != null) {
-              placedLetters[i] = null;
-              len--;
-            }
+          for (int i = start; i < start + len; i++) {
+            placedLetters[i] = null;
           }
           message = 'Great! "$word" +$points points.';
-          break;
+          setState(() {
+            lastWordMessage = message;
+          });
+          return;
         }
       }
     }
 
-    if (message.startsWith('Keep')) {
-      final current = currentLetters.join();
-      if (current.isNotEmpty) {
-        message = 'Current letters: ${current.toUpperCase()}';
-      }
+    final visibleLetters = placedLetters.map((letter) => letter ?? '_').join();
+    if (visibleLetters.replaceAll('_', '').isNotEmpty) {
+      message = 'Current: ${visibleLetters.toUpperCase()}';
     }
 
     setState(() {
@@ -219,6 +248,29 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     return Offset(targetX, targetY);
   }
 
+  int _slotIndexForOffset(Offset pointer, Size size) {
+    final boxWidth = size.width / 10;
+    return (pointer.dx / boxWidth).floor().clamp(0, 9);
+  }
+
+  int? _chooseLandingIndex(int targetIndex) {
+    if (placedLetters[targetIndex] == null) return targetIndex;
+    for (int step = 1; step < 10; step++) {
+      final left = targetIndex - step;
+      final right = targetIndex + step;
+      if (left >= 0 && placedLetters[left] == null) return left;
+      if (right < 10 && placedLetters[right] == null) return right;
+    }
+    return null;
+  }
+
+  Offset _slotCenter(int index, Size size) {
+    final boxWidth = size.width / 10;
+    final x = (index + 0.5) * boxWidth;
+    final y = 16.0 + 25.0; // row top plus half cell height
+    return Offset(x, y);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -241,11 +293,14 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Available Balls', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text('Available Balls',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 Expanded(
                   child: GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       childAspectRatio: 1,
                       crossAxisSpacing: 8,
@@ -259,19 +314,28 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                         onTap: () => _selectBall(index),
                         child: CircleAvatar(
                           radius: 28,
-                          backgroundColor: isSelected ? Colors.orange : Colors.blue,
-                          child: Text(letter, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                          backgroundColor:
+                              isSelected ? Colors.orange : Colors.blue,
+                          child: Text(letter,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold)),
                         ),
                       );
                     },
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('Score: $score', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Score: $score',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                Text('Rounds: $roundsLeft', style: const TextStyle(fontSize: 16)),
+                Text('Rounds: $roundsLeft',
+                    style: const TextStyle(fontSize: 16)),
                 const SizedBox(height: 12),
-                ElevatedButton(onPressed: _resetGame, child: const Text('Reset')),
+                ElevatedButton(
+                    onPressed: _resetGame, child: const Text('Reset')),
               ],
             ),
           ),
@@ -285,16 +349,21 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Status: ${gameOver ? 'Game Over' : lastWordMessage}', style: const TextStyle(fontSize: 16)),
+                      Text(
+                          'Status: ${gameOver ? 'Game Over' : lastWordMessage}',
+                          style: const TextStyle(fontSize: 16)),
                       const SizedBox(height: 8),
-                      Text('Placed: ${placedLetters.where((l) => l != null).join()}', style: const TextStyle(fontSize: 16)),
+                      Text(
+                          'Placed: ${placedLetters.where((l) => l != null).join()}',
+                          style: const TextStyle(fontSize: 16)),
                     ],
                   ),
                 ),
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final playSize = Size(constraints.maxWidth, constraints.maxHeight);
+                      final playSize =
+                          Size(constraints.maxWidth, constraints.maxHeight);
                       final launcher = _launcherCenter(playSize);
                       return GestureDetector(
                         onPanStart: (details) {
@@ -311,7 +380,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                           });
                         },
                         child: Container(
-                          color: Colors.white,
+                          clipBehavior: Clip.hardEdge,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            border: Border.all(color: Colors.black, width: 4),
+                          ),
                           child: Stack(
                             children: [
                               Positioned(
@@ -322,7 +395,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                   height: 68,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.deepPurple, width: 4),
+                                    border: Border.all(
+                                        color: Colors.deepPurple, width: 4),
                                   ),
                                 ),
                               ),
@@ -353,23 +427,43 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                 child: Row(
                                   children: List.generate(10, (index) {
                                     final letter = placedLetters[index];
-                                    return SizedBox(
-                                      width: constraints.maxWidth / 10,
-                                      height: 50,
-                                      child: letter != null
-                                          ? Center(
-                                              child: CircleAvatar(
-                                                radius: (constraints.maxWidth / 10) / 2 - 5,
-                                                backgroundColor: _ballColor(letter),
-                                                child: Text(letter, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                                              ),
-                                            )
-                                          : const SizedBox.shrink(),
+                                    return Expanded(
+                                      child: Container(
+                                        height: 50,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade50,
+                                          border: Border.all(
+                                            color: Colors.grey.shade300,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: letter != null
+                                            ? Center(
+                                                child: CircleAvatar(
+                                                  radius: max(
+                                                      0,
+                                                      (constraints.maxWidth /
+                                                                  10) /
+                                                              2 -
+                                                          10),
+                                                  backgroundColor:
+                                                      _ballColor(letter),
+                                                  child: Text(letter,
+                                                      style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 18,
+                                                          fontWeight:
+                                                              FontWeight.bold)),
+                                                ),
+                                              )
+                                            : const SizedBox.shrink(),
+                                      ),
                                     );
                                   }),
                                 ),
                               ),
-                              if (_shotAnimation != null && _movingLetter != null)
+                              if (_shotAnimation != null &&
+                                  _movingLetter != null)
                                 AnimatedBuilder(
                                   animation: _shotAnimation!,
                                   builder: (context, child) {
@@ -379,8 +473,13 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                       top: position.dy - 20,
                                       child: CircleAvatar(
                                         radius: 20,
-                                        backgroundColor: _ballColor(_movingLetter!),
-                                        child: Text(_movingLetter!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                        backgroundColor:
+                                            _ballColor(_movingLetter!),
+                                        child: Text(_movingLetter!,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold)),
                                       ),
                                     );
                                   },
@@ -393,11 +492,20 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Text('GAME OVER', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                                          const Text('GAME OVER',
+                                              style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 32,
+                                                  fontWeight: FontWeight.bold)),
                                           const SizedBox(height: 16),
-                                          Text('Final Score: $score', style: const TextStyle(color: Colors.white, fontSize: 20)),
+                                          Text('Final Score: $score',
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 20)),
                                           const SizedBox(height: 16),
-                                          ElevatedButton(onPressed: _resetGame, child: const Text('Play Again')),
+                                          ElevatedButton(
+                                              onPressed: _resetGame,
+                                              child: const Text('Play Again')),
                                         ],
                                       ),
                                     ),
