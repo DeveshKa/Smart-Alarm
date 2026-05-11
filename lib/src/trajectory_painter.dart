@@ -16,15 +16,15 @@ class TrajectoryPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.blue
-      ..strokeWidth = 2.0
+      ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke;
 
     final path = Path();
     path.moveTo(start.dx, start.dy);
     path.lineTo(end.dx, end.dy);
 
-    // Create dotted effect
-    final dashPath = _createDashedPath(path, 5.0, 5.0);
+    // Create longer dotted effect
+    final dashPath = _createDashedPath(path, 10.0, 5.0);
 
     // Apply fading
     final shader = LinearGradient(
