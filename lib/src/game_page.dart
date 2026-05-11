@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'trajectory_painter.dart';
 import 'dictionary.dart';
 
+enum ShootDirection { up, upLeft, upRight }
+
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
 
@@ -14,20 +16,22 @@ class GamePage extends StatefulWidget {
 class _GamePageState extends State<GamePage>
     with SingleTickerProviderStateMixin {
   List<String> availableBalls = [];
-  List<String?> placedLetters = List.filled(10, null);
+  // 10x10 matrix: row * 10 + col
+  List<String?> placedLetters = List.filled(100, null);
   int score = 0;
-  int roundsLeft = 15;
+  int roundsLeft = 100;
   int selectedBallIndex = -1;
   bool isAiming = false;
   bool isAnimating = false;
   String lastWordMessage = 'Select a ball and drag to shoot.';
   Offset? aimTarget;
-  Offset _launcherPosition = Offset.zero;
   late final AnimationController _shotController;
   Animation<Offset>? _shotAnimation;
   String? _movingLetter;
-  int? _landingIndex;
+  int? _landingRow;
+  int? _landingCol;
   Size? _playSize;
+  ShootDirection _shootDirection = ShootDirection.up;
 
   @override
   void initState() {
@@ -89,19 +93,20 @@ class _GamePageState extends State<GamePage>
     }
     final random = Random();
     availableBalls = List.generate(
-        10, (_) => weightedLetters[random.nextInt(weightedLetters.length)]);
+        100, (_) => weightedLetters[random.nextInt(weightedLetters.length)]);
   }
 
   void _resetGame() {
     setState(() {
       score = 0;
-      roundsLeft = 15;
-      placedLetters = List.filled(10, null);
+      roundsLeft = 100;
+      placedLetters = List.filled(100, null);
       selectedBallIndex = -1;
       isAiming = false;
       aimTarget = null;
       _movingLetter = null;
       _shotAnimation = null;
+      _shootDirection = ShootDirection.up;
       lastWordMessage = 'Select a ball and drag to shoot.';
       _generateBalls();
     });
@@ -117,35 +122,43 @@ class _GamePageState extends State<GamePage>
   }
 
   void _startAiming(Offset position, Size size) {
-    if (selectedBallIndex < 0 || isAnimating || gameOver) return;
+    if (selectedBallIndex < 0 || isAnimating || gameOver) {
+      return;
+    }
     setState(() {
       isAiming = true;
-      _launcherPosition = _launcherCenter(size);
       _playSize = size;
       aimTarget = _computeAimTarget(position, size);
     });
   }
 
   void _updateAiming(Offset position, Size size) {
-    if (!isAiming || isAnimating || gameOver) return;
+    if (!isAiming || isAnimating || gameOver) {
+      return;
+    }
     setState(() {
-      _launcherPosition = _launcherCenter(size);
       _playSize = size;
       aimTarget = _computeAimTarget(position, size);
     });
   }
 
   void _shootSelectedBall() {
-    if (selectedBallIndex < 0 || aimTarget == null || isAnimating || gameOver)
+    if (selectedBallIndex < 0 || aimTarget == null || isAnimating || gameOver) {
       return;
+    }
 
-    if (_playSize == null || aimTarget == null) return;
+    if (_playSize == null || aimTarget == null) {
+      return;
+    }
 
-    final targetIndex = _slotIndexForOffset(aimTarget!, _playSize!);
-    final landingIndex = _chooseLandingIndex(targetIndex);
-    if (landingIndex == null) {
+    final boxWidth = _playSize!.width / 10;
+    final targetCol = (aimTarget!.dx / boxWidth).floor().clamp(0, 9);
+
+    final result = _chooseLandingPosition(targetCol, _shootDirection);
+
+    if (result == null) {
       setState(() {
-        lastWordMessage = 'No empty target slots available.';
+        lastWordMessage = 'Cannot shoot further in this direction!';
       });
       return;
     }
@@ -157,11 +170,13 @@ class _GamePageState extends State<GamePage>
       roundsLeft = max(0, roundsLeft - 1);
       lastWordMessage = 'Shooting $letter...';
       _movingLetter = letter;
-      _landingIndex = landingIndex;
-      aimTarget = _slotCenter(_landingIndex!, _playSize!);
+      _landingRow = result['row'] as int;
+      _landingCol = result['col'] as int;
+      aimTarget = _slotCenter(_landingRow!, _landingCol!, _playSize!);
     });
 
-    _shotAnimation = Tween<Offset>(begin: _launcherPosition, end: aimTarget!)
+    final startPosition = Offset(aimTarget!.dx, 0.0);
+    _shotAnimation = Tween<Offset>(begin: startPosition, end: aimTarget!)
         .chain(CurveTween(curve: Curves.easeOut))
         .animate(_shotController);
 
@@ -170,8 +185,8 @@ class _GamePageState extends State<GamePage>
 
   void _finishShot() {
     setState(() {
-      if (_movingLetter != null && _landingIndex != null) {
-        placedLetters[_landingIndex!] = _movingLetter;
+      if (_movingLetter != null && _landingRow != null && _landingCol != null) {
+        placedLetters[_landingRow! * 10 + _landingCol!] = _movingLetter;
         _checkForWord();
       }
       isAnimating = false;
@@ -179,7 +194,8 @@ class _GamePageState extends State<GamePage>
       aimTarget = null;
       _shotAnimation = null;
       _movingLetter = null;
-      _landingIndex = null;
+      _landingRow = null;
+      _landingCol = null;
       if (availableBalls.isEmpty && !gameOver) {
         _generateBalls();
       }
@@ -189,22 +205,54 @@ class _GamePageState extends State<GamePage>
   void _checkForWord() {
     String message = 'Keep shooting to form a valid word.';
 
-    for (int len = 6; len >= 2; len--) {
-      for (int start = 0; start <= 10 - len; start++) {
-        final slice = placedLetters.sublist(start, start + len);
-        if (slice.any((letter) => letter == null)) continue;
-        final word = slice.join().toLowerCase();
-        if (dictionary.contains(word)) {
-          final points = getScore(len);
-          score += points;
-          for (int i = start; i < start + len; i++) {
-            placedLetters[i] = null;
+    // Check horizontal words
+    for (int row = 0; row < 10; row++) {
+      for (int len = 6; len >= 2; len--) {
+        for (int start = 0; start <= 10 - len; start++) {
+          List<String?> slice = [];
+          for (int col = start; col < start + len; col++) {
+            slice.add(placedLetters[row * 10 + col]);
           }
-          message = 'Great! "$word" +$points points.';
-          setState(() {
-            lastWordMessage = message;
-          });
-          return;
+          if (slice.any((letter) => letter == null)) continue;
+          final word = slice.join().toLowerCase();
+          if (dictionary.contains(word)) {
+            final points = getScore(len);
+            score += points;
+            for (int col = start; col < start + len; col++) {
+              placedLetters[row * 10 + col] = null;
+            }
+            message = 'Great! "$word" +$points points.';
+            setState(() {
+              lastWordMessage = message;
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    // Check vertical words
+    for (int col = 0; col < 10; col++) {
+      for (int len = 6; len >= 2; len--) {
+        for (int start = 0; start <= 10 - len; start++) {
+          List<String?> slice = [];
+          for (int row = start; row < start + len; row++) {
+            slice.add(placedLetters[row * 10 + col]);
+          }
+          if (slice.any((letter) => letter == null)) continue;
+          final word = slice.join().toLowerCase();
+          if (dictionary.contains(word)) {
+            final points = getScore(len);
+            score += points;
+            for (int row = start; row < start + len; row++) {
+              placedLetters[row * 10 + col] = null;
+            }
+            message = 'Great! "$word" +$points points.';
+            setState(() {
+              lastWordMessage = message;
+            });
+            return;
+          }
         }
       }
     }
@@ -241,33 +289,68 @@ class _GamePageState extends State<GamePage>
   }
 
   Offset _computeAimTarget(Offset pointer, Size size) {
+    _shootDirection = _determineDirection(pointer, size);
     final boxWidth = size.width / 10;
-    final boxIndex = (pointer.dx / boxWidth).floor().clamp(0, 9);
-    final targetX = (boxIndex + 0.5) * boxWidth;
-    final targetY = 40.0; // Top of the play area
+    final boxHeight = (size.height - 16 - 60) / 10; // Playable height / 10 rows
+
+    int targetCol = ((pointer.dx) / boxWidth).floor().clamp(0, 9);
+    const targetRow = 0; // Aim towards top row
+
+    final targetX = (targetCol + 0.5) * boxWidth;
+    final targetY = 16 + (targetRow + 0.5) * boxHeight;
+
     return Offset(targetX, targetY);
   }
 
-  int _slotIndexForOffset(Offset pointer, Size size) {
+  ShootDirection _determineDirection(Offset position, Size size) {
     final boxWidth = size.width / 10;
-    return (pointer.dx / boxWidth).floor().clamp(0, 9);
+    final launcherX = size.width / 2;
+
+    // Determine direction based on horizontal position relative to launcher
+    if (position.dx < launcherX - boxWidth * 2) {
+      return ShootDirection.upLeft;
+    } else if (position.dx > launcherX + boxWidth * 2) {
+      return ShootDirection.upRight;
+    }
+    return ShootDirection.up;
   }
 
-  int? _chooseLandingIndex(int targetIndex) {
-    if (placedLetters[targetIndex] == null) return targetIndex;
-    for (int step = 1; step < 10; step++) {
-      final left = targetIndex - step;
-      final right = targetIndex + step;
-      if (left >= 0 && placedLetters[left] == null) return left;
-      if (right < 10 && placedLetters[right] == null) return right;
+  Map<String, int>? _chooseLandingPosition(
+      int startCol, ShootDirection direction) {
+    // Based on direction, search vertically in the appropriate column
+    int searchCol = startCol;
+
+    // Adjust column based on direction
+    if (direction == ShootDirection.upLeft && startCol > 0) {
+      searchCol = startCol - 1;
+    } else if (direction == ShootDirection.upRight && startCol < 9) {
+      searchCol = startCol + 1;
     }
+
+    // Check boundaries
+    if (searchCol < 0 || searchCol > 9) {
+      return null;
+    }
+
+    // Find first empty slot from top going down in the selected column
+    for (int row = 0; row < 10; row++) {
+      final index = row * 10 + searchCol;
+      if (placedLetters[index] == null) {
+        return {'row': row, 'col': searchCol};
+      }
+    }
+
+    // Column is full
     return null;
   }
 
-  Offset _slotCenter(int index, Size size) {
+  Offset _slotCenter(int row, int col, Size size) {
     final boxWidth = size.width / 10;
-    final x = (index + 0.5) * boxWidth;
-    final y = 16.0 + 25.0; // row top plus half cell height
+    final boxHeight = (size.height - 16 - 60) / 10;
+
+    final x = (col + 0.5) * boxWidth;
+    final y = 16 + (row + 0.5) * boxHeight;
+
     return Offset(x, y);
   }
 
@@ -306,7 +389,7 @@ class _GamePageState extends State<GamePage>
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
                     ),
-                    itemCount: availableBalls.length,
+                    itemCount: min(12, availableBalls.length),
                     itemBuilder: (context, index) {
                       final letter = availableBalls[index];
                       final isSelected = index == selectedBallIndex;
@@ -424,39 +507,56 @@ class _GamePageState extends State<GamePage>
                                 left: 0,
                                 top: 16,
                                 right: 0,
-                                child: Row(
-                                  children: List.generate(10, (index) {
-                                    final letter = placedLetters[index];
+                                bottom: 60,
+                                child: Column(
+                                  children: List.generate(10, (row) {
                                     return Expanded(
-                                      child: Container(
-                                        height: 50,
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey.shade50,
-                                          border: Border.all(
-                                            color: Colors.grey.shade300,
-                                            width: 1,
-                                          ),
-                                        ),
-                                        child: letter != null
-                                            ? Center(
-                                                child: CircleAvatar(
-                                                  radius: max(
-                                                      0,
-                                                      (constraints.maxWidth /
-                                                                  10) /
-                                                              2 -
-                                                          10),
-                                                  backgroundColor:
-                                                      _ballColor(letter),
-                                                  child: Text(letter,
-                                                      style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 18,
-                                                          fontWeight:
-                                                              FontWeight.bold)),
+                                      child: Row(
+                                        children: List.generate(10, (col) {
+                                          final index = row * 10 + col;
+                                          final letter = placedLetters[index];
+                                          final boxWidth =
+                                              constraints.maxWidth / 10;
+                                          final boxHeight =
+                                              (constraints.maxHeight -
+                                                      16 -
+                                                      60) /
+                                                  10;
+
+                                          return Expanded(
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey.shade50,
+                                                border: Border.all(
+                                                  color: Colors.grey.shade300,
+                                                  width: 1,
                                                 ),
-                                              )
-                                            : const SizedBox.shrink(),
+                                              ),
+                                              child: letter != null
+                                                  ? Center(
+                                                      child: CircleAvatar(
+                                                        radius: max(
+                                                            0,
+                                                            min(boxWidth,
+                                                                        boxHeight) /
+                                                                    2 -
+                                                                8),
+                                                        backgroundColor:
+                                                            _ballColor(letter),
+                                                        child: Text(letter,
+                                                            style: const TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                                fontSize: 16,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold)),
+                                                      ),
+                                                    )
+                                                  : const SizedBox.shrink(),
+                                            ),
+                                          );
+                                        }),
                                       ),
                                     );
                                   }),
