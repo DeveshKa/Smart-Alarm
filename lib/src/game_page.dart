@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'trajectory_painter.dart';
 import 'dictionary.dart';
 
-enum ShootDirection { up, upLeft, upRight }
-
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
 
@@ -13,8 +11,7 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage>
-    with SingleTickerProviderStateMixin {
+class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   List<String> availableBalls = [];
   // 10x10 matrix: row * 10 + col
   List<String?> placedLetters = List.filled(100, null);
@@ -31,7 +28,12 @@ class _GamePageState extends State<GamePage>
   int? _landingRow;
   int? _landingCol;
   Size? _playSize;
-  ShootDirection _shootDirection = ShootDirection.up;
+  int? _targetColumn;
+  bool _showConfetti = false;
+  bool _doubleConfetti = false;
+  late final AnimationController _confettiController;
+  List<_ConfettiParticle> _confettiParticles = [];
+  Set<String> madeWords = {};
 
   @override
   void initState() {
@@ -45,12 +47,24 @@ class _GamePageState extends State<GamePage>
         }
       });
 
+    _confettiController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          setState(() {
+            _showConfetti = false;
+          });
+        }
+      });
+
     _generateBalls();
   }
 
   @override
   void dispose() {
     _shotController.dispose();
+    _confettiController.dispose();
     super.dispose();
   }
 
@@ -106,7 +120,11 @@ class _GamePageState extends State<GamePage>
       aimTarget = null;
       _movingLetter = null;
       _shotAnimation = null;
-      _shootDirection = ShootDirection.up;
+      _targetColumn = null;
+      _showConfetti = false;
+      _doubleConfetti = false;
+      _confettiParticles = [];
+      madeWords = {};
       lastWordMessage = 'Select a ball and drag to shoot.';
       _generateBalls();
     });
@@ -128,7 +146,8 @@ class _GamePageState extends State<GamePage>
     setState(() {
       isAiming = true;
       _playSize = size;
-      aimTarget = _computeAimTarget(position, size);
+      _targetColumn = _computeTargetColumn(position, size);
+      aimTarget = _computeAimTarget(_targetColumn!, size);
     });
   }
 
@@ -138,7 +157,8 @@ class _GamePageState extends State<GamePage>
     }
     setState(() {
       _playSize = size;
-      aimTarget = _computeAimTarget(position, size);
+      _targetColumn = _computeTargetColumn(position, size);
+      aimTarget = _computeAimTarget(_targetColumn!, size);
     });
   }
 
@@ -147,18 +167,15 @@ class _GamePageState extends State<GamePage>
       return;
     }
 
-    if (_playSize == null || aimTarget == null) {
+    if (_playSize == null || _targetColumn == null) {
       return;
     }
 
-    final boxWidth = _playSize!.width / 10;
-    final targetCol = (aimTarget!.dx / boxWidth).floor().clamp(0, 9);
-
-    final result = _chooseLandingPosition(targetCol, _shootDirection);
+    final result = _chooseLandingPosition(_targetColumn!);
 
     if (result == null) {
       setState(() {
-        lastWordMessage = 'Cannot shoot further in this direction!';
+        lastWordMessage = 'Cannot shoot further in that column!';
       });
       return;
     }
@@ -205,26 +222,28 @@ class _GamePageState extends State<GamePage>
   void _checkForWord() {
     String message = 'Keep shooting to form a valid word.';
 
-    // Check horizontal words
+    // Check horizontal words first
     for (int row = 0; row < 10; row++) {
       for (int len = 6; len >= 2; len--) {
         for (int start = 0; start <= 10 - len; start++) {
-          List<String?> slice = [];
-          for (int col = start; col < start + len; col++) {
-            slice.add(placedLetters[row * 10 + col]);
-          }
+          final slice = List<String?>.generate(
+              len, (index) => placedLetters[row * 10 + start + index]);
           if (slice.any((letter) => letter == null)) continue;
           final word = slice.join().toLowerCase();
           if (dictionary.contains(word)) {
+            if (madeWords.contains(word)) {
+              _showAlreadyMadeDialog(word);
+              return;
+            }
             final points = getScore(len);
             score += points;
-            for (int col = start; col < start + len; col++) {
-              placedLetters[row * 10 + col] = null;
+            madeWords.add(word);
+            for (int index = 0; index < len; index++) {
+              placedLetters[row * 10 + start + index] = null;
             }
             message = 'Great! "$word" +$points points.';
-            setState(() {
-              lastWordMessage = message;
-            });
+            _triggerConfetti(word.length);
+            lastWordMessage = message;
             return;
           }
         }
@@ -235,22 +254,24 @@ class _GamePageState extends State<GamePage>
     for (int col = 0; col < 10; col++) {
       for (int len = 6; len >= 2; len--) {
         for (int start = 0; start <= 10 - len; start++) {
-          List<String?> slice = [];
-          for (int row = start; row < start + len; row++) {
-            slice.add(placedLetters[row * 10 + col]);
-          }
+          final slice = List<String?>.generate(
+              len, (index) => placedLetters[(start + index) * 10 + col]);
           if (slice.any((letter) => letter == null)) continue;
           final word = slice.join().toLowerCase();
           if (dictionary.contains(word)) {
+            if (madeWords.contains(word)) {
+              _showAlreadyMadeDialog(word);
+              return;
+            }
             final points = getScore(len);
             score += points;
-            for (int row = start; row < start + len; row++) {
-              placedLetters[row * 10 + col] = null;
+            madeWords.add(word);
+            for (int index = 0; index < len; index++) {
+              placedLetters[(start + index) * 10 + col] = null;
             }
             message = 'Great! "$word" +$points points.';
-            setState(() {
-              lastWordMessage = message;
-            });
+            _triggerConfetti(word.length);
+            lastWordMessage = message;
             return;
           }
         }
@@ -262,9 +283,57 @@ class _GamePageState extends State<GamePage>
       message = 'Current: ${visibleLetters.toUpperCase()}';
     }
 
-    setState(() {
-      lastWordMessage = message;
+    lastWordMessage = message;
+  }
+
+  void _triggerConfetti(int wordLength) {
+    final random = Random();
+    _doubleConfetti = wordLength > 4;
+    final particleCount = _doubleConfetti ? 60 : 30;
+    _confettiParticles = List.generate(particleCount, (_) {
+      return _ConfettiParticle(
+        base: Offset(random.nextDouble(), random.nextDouble()),
+        direction:
+            Offset(random.nextDouble() * 2 - 1, random.nextDouble() * 2 - 1),
+        color: _confettiColor(random),
+        speed: 40 + random.nextDouble() * 120,
+        radius: 3 + random.nextDouble() * 4,
+      );
     });
+    _showConfetti = true;
+    _confettiController.forward(from: 0.0);
+  }
+
+  void _showAlreadyMadeDialog(String word) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Word Already Made!'),
+        content: Text(
+          'You\'ve already made the word "$word" earlier.\n\nTry making a different word!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _confettiColor(Random random) {
+    const palette = [
+      Colors.red,
+      Colors.orange,
+      Colors.yellow,
+      Colors.green,
+      Colors.blue,
+      Colors.indigo,
+      Colors.purple,
+      Colors.pink,
+    ];
+    return palette[random.nextInt(palette.length)];
   }
 
   Color _ballColor(String letter) {
@@ -288,55 +357,31 @@ class _GamePageState extends State<GamePage>
     return Offset(size.width / 2, size.height - 60);
   }
 
-  Offset _computeAimTarget(Offset pointer, Size size) {
-    _shootDirection = _determineDirection(pointer, size);
+  int _computeTargetColumn(Offset pointer, Size size) {
+    final boxWidth = size.width / 10;
+    return ((pointer.dx) / boxWidth).floor().clamp(0, 9);
+  }
+
+  Offset _computeAimTarget(int column, Size size) {
     final boxWidth = size.width / 10;
     final boxHeight = (size.height - 16 - 60) / 10; // Playable height / 10 rows
 
-    int targetCol = ((pointer.dx) / boxWidth).floor().clamp(0, 9);
     const targetRow = 0; // Aim towards top row
-
-    final targetX = (targetCol + 0.5) * boxWidth;
+    final targetX = (column + 0.5) * boxWidth;
     final targetY = 16 + (targetRow + 0.5) * boxHeight;
 
     return Offset(targetX, targetY);
   }
 
-  ShootDirection _determineDirection(Offset position, Size size) {
-    final boxWidth = size.width / 10;
-    final launcherX = size.width / 2;
-
-    // Determine direction based on horizontal position relative to launcher
-    if (position.dx < launcherX - boxWidth * 2) {
-      return ShootDirection.upLeft;
-    } else if (position.dx > launcherX + boxWidth * 2) {
-      return ShootDirection.upRight;
-    }
-    return ShootDirection.up;
-  }
-
-  Map<String, int>? _chooseLandingPosition(
-      int startCol, ShootDirection direction) {
-    // Based on direction, search vertically in the appropriate column
-    int searchCol = startCol;
-
-    // Adjust column based on direction
-    if (direction == ShootDirection.upLeft && startCol > 0) {
-      searchCol = startCol - 1;
-    } else if (direction == ShootDirection.upRight && startCol < 9) {
-      searchCol = startCol + 1;
-    }
-
-    // Check boundaries
-    if (searchCol < 0 || searchCol > 9) {
+  Map<String, int>? _chooseLandingPosition(int column) {
+    if (column < 0 || column > 9) {
       return null;
     }
 
-    // Find first empty slot from top going down in the selected column
     for (int row = 0; row < 10; row++) {
-      final index = row * 10 + searchCol;
+      final index = row * 10 + column;
       if (placedLetters[index] == null) {
-        return {'row': row, 'col': searchCol};
+        return {'row': row, 'col': column};
       }
     }
 
@@ -495,6 +540,18 @@ class _GamePageState extends State<GamePage>
                                   ),
                                 ),
                               ),
+                              if (isAiming && _targetColumn != null)
+                                Positioned(
+                                  left: _targetColumn! *
+                                      (constraints.maxWidth / 10),
+                                  top: 16,
+                                  width: constraints.maxWidth / 10,
+                                  bottom: 60,
+                                  child: Container(
+                                    color: const Color.fromRGBO(
+                                        33, 150, 243, 0.08),
+                                  ),
+                                ),
                               if (isAiming && aimTarget != null)
                                 CustomPaint(
                                   painter: TrajectoryPainter(
@@ -502,6 +559,23 @@ class _GamePageState extends State<GamePage>
                                     end: aimTarget!,
                                   ),
                                   size: Size.infinite,
+                                ),
+                              if (_showConfetti)
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: AnimatedBuilder(
+                                      animation: _confettiController,
+                                      builder: (context, child) {
+                                        return CustomPaint(
+                                          painter: _ConfettiPainter(
+                                            particles: _confettiParticles,
+                                            progress: _confettiController.value,
+                                          ),
+                                          child: const SizedBox.expand(),
+                                        );
+                                      },
+                                    ),
+                                  ),
                                 ),
                               Positioned(
                                 left: 0,
@@ -624,5 +698,51 @@ class _GamePageState extends State<GamePage>
         ],
       ),
     );
+  }
+}
+
+class _ConfettiParticle {
+  final Offset base;
+  final Offset direction;
+  final Color color;
+  final double speed;
+  final double radius;
+
+  _ConfettiParticle({
+    required this.base,
+    required this.direction,
+    required this.color,
+    required this.speed,
+    required this.radius,
+  });
+}
+
+class _ConfettiPainter extends CustomPainter {
+  final List<_ConfettiParticle> particles;
+  final double progress;
+
+  _ConfettiPainter({required this.particles, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (particles.isEmpty) return;
+
+    for (final particle in particles) {
+      final origin =
+          Offset(particle.base.dx * size.width, particle.base.dy * size.height);
+      final offset = origin + particle.direction * particle.speed * progress;
+      final opacity = (1 - progress).clamp(0.0, 1.0);
+      final paint = Paint()
+        ..color = particle.color.withAlpha((opacity * 255).round())
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(offset, particle.radius * (1 + progress), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConfettiPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.particles != particles;
   }
 }
