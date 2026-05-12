@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
@@ -16,27 +17,37 @@ class TrajectoryPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.blue
-      ..strokeWidth = 3.0
-      ..style = PaintingStyle.stroke;
+      ..strokeWidth = 8.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
 
     final path = Path();
     path.moveTo(start.dx, start.dy);
     path.lineTo(end.dx, end.dy);
 
-    // Create longer dotted effect
-    final dashPath = _createDashedPath(path, 10.0, 5.0);
+    // Create longer dotted effect with clearer visibility
+    final dashPath = _createDashedPath(path, 16.0, 8.0);
 
-    // Apply fading
     final shader = LinearGradient(
-      begin: Alignment(start.dx / size.width, start.dy / size.height),
-      end: Alignment(end.dx / size.width, end.dy / size.height),
-      colors: [Colors.blue, Colors.transparent],
-      stops: [0.0, 1.0],
+      begin: Alignment(start.dx / math.max(size.width, 1.0),
+          start.dy / math.max(size.height, 1.0)),
+      end: Alignment(end.dx / math.max(size.width, 1.0),
+          end.dy / math.max(size.height, 1.0)),
+      colors: [Colors.blue.shade700, Colors.blue.shade200, Colors.transparent],
+      stops: const [0.0, 0.6, 1.0],
     ).createShader(Rect.fromPoints(start, end));
 
     paint.shader = shader;
-
     canvas.drawPath(dashPath, paint);
+
+    final dotPaint = Paint()..color = const Color.fromRGBO(255, 255, 255, 0.75);
+    for (double t = 0.0; t <= 1.0; t += 0.2) {
+      final point = Offset(
+        start.dx + (end.dx - start.dx) * t,
+        start.dy + (end.dy - start.dy) * t,
+      );
+      canvas.drawCircle(point, 6.0, dotPaint);
+    }
   }
 
   Path _createDashedPath(Path source, double dashLength, double gapLength) {
