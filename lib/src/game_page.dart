@@ -34,6 +34,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   late final AnimationController _confettiController;
   List<_ConfettiParticle> _confettiParticles = [];
   Set<String> madeWords = {};
+  Set<String> shownDuplicateDialog = {};
 
   @override
   void initState() {
@@ -125,6 +126,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       _doubleConfetti = false;
       _confettiParticles = [];
       madeWords = {};
+      shownDuplicateDialog = {};
       lastWordMessage = 'Select a ball and drag to shoot.';
       _generateBalls();
     });
@@ -232,7 +234,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           final word = slice.join().toLowerCase();
           if (dictionary.contains(word)) {
             if (madeWords.contains(word)) {
-              _showAlreadyMadeDialog(word);
+              if (!shownDuplicateDialog.contains(word)) {
+                shownDuplicateDialog.add(word);
+                _showAlreadyMadeDialog(word);
+              }
               return;
             }
             final points = getScore(len);
@@ -260,7 +265,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           final word = slice.join().toLowerCase();
           if (dictionary.contains(word)) {
             if (madeWords.contains(word)) {
-              _showAlreadyMadeDialog(word);
+              if (!shownDuplicateDialog.contains(word)) {
+                shownDuplicateDialog.add(word);
+                _showAlreadyMadeDialog(word);
+              }
               return;
             }
             final points = getScore(len);
@@ -484,6 +492,30 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                       Text(
                           'Placed: ${placedLetters.where((l) => l != null).join()}',
                           style: const TextStyle(fontSize: 16)),
+                      const SizedBox(height: 12),
+                      const Text('Words made:',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 6),
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 96),
+                        child: madeWords.isEmpty
+                            ? const Text('None yet',
+                                style: TextStyle(fontSize: 14))
+                            : SingleChildScrollView(
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: madeWords
+                                      .map((word) => Chip(
+                                            label: Text(word.toUpperCase()),
+                                            backgroundColor:
+                                                Colors.blue.shade50,
+                                          ))
+                                      .toList(),
+                                ),
+                              ),
+                      ),
                     ],
                   ),
                 ),
