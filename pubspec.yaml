@@ -22,3 +22,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - resources/Backgrounds/Blue Nebula/
+    - resources/Backgrounds/Green Nebula/
+    - resources/Backgrounds/Purple Nebula/
+    - resources/Backgrounds/Starfields/
+    - resources/Balls/
