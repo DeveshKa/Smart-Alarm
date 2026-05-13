@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'trajectory_painter.dart';
 import 'dictionary.dart';
+import 'image_utils.dart';
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
@@ -36,6 +37,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   Set<String> madeWords = {};
   Set<String> shownDuplicateDialog = {};
 
+  // Background wallpaper image path
+  String? _backgroundImage;
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +63,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         }
       });
 
+    _backgroundImage = ImageUtils.getRandomBackgroundImage();
     _generateBalls();
   }
 
@@ -107,8 +112,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       weightedLetters.addAll(List.filled(4, vowel));
     }
     final random = Random();
-    availableBalls = List.generate(
-        100, (_) => weightedLetters[random.nextInt(weightedLetters.length)]);
+    availableBalls = List.generate(100, (_) {
+      final letter = weightedLetters[random.nextInt(weightedLetters.length)];
+      return letter;
+    });
   }
 
   void _resetGame() {
@@ -128,6 +135,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       madeWords = {};
       shownDuplicateDialog = {};
       lastWordMessage = 'Select a ball and drag to shoot.';
+      _backgroundImage = ImageUtils.getRandomBackgroundImage();
       _generateBalls();
     });
   }
@@ -446,17 +454,31 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                     itemBuilder: (context, index) {
                       final letter = availableBalls[index];
                       final isSelected = index == selectedBallIndex;
+
                       return GestureDetector(
                         onTap: () => _selectBall(index),
-                        child: CircleAvatar(
-                          radius: 28,
-                          backgroundColor:
-                              isSelected ? Colors.orange : Colors.blue,
-                          child: Text(letter,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: isSelected
+                                ? Border.all(
+                                    color: Colors.orange,
+                                    width: 3,
+                                  )
+                                : null,
+                          ),
+                          child: CircleAvatar(
+                            radius: 28,
+                            backgroundColor: Colors.blue,
+                            child: Text(
+                              letter,
                               style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold)),
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -542,6 +564,12 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                         child: Container(
                           clipBehavior: Clip.hardEdge,
                           decoration: BoxDecoration(
+                            image: _backgroundImage != null
+                                ? DecorationImage(
+                                    image: AssetImage(_backgroundImage!),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
                             color: Colors.white,
                             border: Border.all(color: Colors.black, width: 4),
                           ),
@@ -628,11 +656,14 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                                                       16 -
                                                       60) /
                                                   10;
+                                          final ballSize = max(0,
+                                                  min(boxWidth, boxHeight) - 16)
+                                              .toDouble();
 
                                           return Expanded(
                                             child: Container(
                                               decoration: BoxDecoration(
-                                                color: Colors.grey.shade50,
+                                                color: Colors.transparent,
                                                 border: Border.all(
                                                   color: Colors.grey.shade300,
                                                   width: 1,
@@ -641,12 +672,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                                               child: letter != null
                                                   ? Center(
                                                       child: CircleAvatar(
-                                                        radius: max(
-                                                            0,
-                                                            min(boxWidth,
-                                                                        boxHeight) /
-                                                                    2 -
-                                                                8),
+                                                        radius: ballSize / 2,
                                                         backgroundColor:
                                                             _ballColor(letter),
                                                         child: Text(letter,
