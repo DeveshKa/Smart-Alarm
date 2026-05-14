@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'trajectory_painter.dart';
 import 'dictionary.dart';
 import 'image_utils.dart';
+import 'high_score_manager.dart';
+import 'high_score_dialog.dart';
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
@@ -40,9 +42,17 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   // Background wallpaper image path
   String? _backgroundImage;
 
+  // High score management
+  late HighScoreManager _highScoreManager;
+  int _highestScore = 0;
+  bool _gameOverDialogShown = false;
+
   @override
   void initState() {
     super.initState();
+    _highScoreManager = HighScoreManager();
+    _loadHighestScore();
+
     _shotController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 450),
@@ -67,6 +77,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _generateBalls();
   }
 
+  void _loadHighestScore() async {
+    final highest = await _highScoreManager.getHighestScore();
+    setState(() {
+      _highestScore = highest;
+    });
+  }
+
   @override
   void dispose() {
     _shotController.dispose();
@@ -75,6 +92,17 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   bool get gameOver => roundsLeft <= 0 && !isAnimating;
+
+  void _checkGameOverAndShowDialog() {
+    if (gameOver && !_gameOverDialogShown) {
+      _gameOverDialogShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showGameOverDialog();
+        }
+      });
+    }
+  }
 
   void _generateBalls() {
     final weightedLetters = <String>[];
@@ -136,8 +164,35 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       shownDuplicateDialog = {};
       lastWordMessage = 'Select a ball and drag to shoot.';
       _backgroundImage = ImageUtils.getRandomBackgroundImage();
+      _gameOverDialogShown = false;
       _generateBalls();
     });
+  }
+
+  void _showGameOverDialog() async {
+    // Save the score
+    await _highScoreManager.addScore(score);
+
+    // Get top 5 scores
+    final topScores = await _highScoreManager.getTopScores();
+
+    // Load highest score for display
+    _loadHighestScore();
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => HighScoreDialog(
+        currentScore: score,
+        topScores: topScores,
+        onPlayAgain: () {
+          Navigator.pop(context);
+          _resetGame();
+        },
+      ),
+    );
   }
 
   void _selectBall(int index) {
@@ -226,6 +281,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       if (availableBalls.isEmpty && !gameOver) {
         _generateBalls();
       }
+    });
+    // Check for game over after state update
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _checkGameOverAndShowDialog();
     });
   }
 
@@ -492,6 +551,70 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                 Text('Rounds: $roundsLeft',
                     style: const TextStyle(fontSize: 16)),
                 const SizedBox(height: 12),
+                // Highest Score Display
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.amber.shade600, Colors.orange.shade500],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.amber.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            '🏆',
+                            style: TextStyle(fontSize: 18),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Best Score',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white70,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$_highestScore',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              blurRadius: 4,
+                              color: Colors.black26,
+                              offset: Offset(1, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
                 ElevatedButton(
                     onPressed: _resetGame, child: const Text('Reset')),
               ],
@@ -502,7 +625,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Container(
-                  color: Colors.blue[50],
+                  color: Colors.blue.shade50,
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -608,8 +731,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                                   width: constraints.maxWidth / 10,
                                   bottom: 60,
                                   child: Container(
-                                    color: const Color.fromRGBO(
-                                        33, 150, 243, 0.08),
+                                    color:
+                                        const Color.fromARGB(20, 33, 150, 243),
                                   ),
                                 ),
                               if (isAiming && aimTarget != null)
@@ -718,28 +841,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                                 ),
                               if (gameOver)
                                 Positioned.fill(
-                                  child: Container(
-                                    color: Colors.black54,
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Text('GAME OVER',
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 32,
-                                                  fontWeight: FontWeight.bold)),
-                                          const SizedBox(height: 16),
-                                          Text('Final Score: $score',
-                                              style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 20)),
-                                          const SizedBox(height: 16),
-                                          ElevatedButton(
-                                              onPressed: _resetGame,
-                                              child: const Text('Play Again')),
-                                        ],
-                                      ),
+                                  child: IgnorePointer(
+                                    child: Container(
+                                      color: Colors.black54,
                                     ),
                                   ),
                                 ),
