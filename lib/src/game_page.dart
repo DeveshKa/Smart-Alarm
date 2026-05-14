@@ -93,6 +93,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
   bool get gameOver => roundsLeft <= 0 && !isAnimating;
 
+  bool _isAcceptedWord(String word) {
+    return dictionary.contains(word);
+  }
+
   void _checkGameOverAndShowDialog() {
     if (gameOver && !_gameOverDialogShown) {
       _gameOverDialogShown = true;
@@ -140,7 +144,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       weightedLetters.addAll(List.filled(4, vowel));
     }
     final random = Random();
-    availableBalls = List.generate(100, (_) {
+    availableBalls = List.generate(12, (_) {
       final letter = weightedLetters[random.nextInt(weightedLetters.length)];
       return letter;
     });
@@ -282,10 +286,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         _generateBalls();
       }
     });
-    // Check for game over after state update
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _checkGameOverAndShowDialog();
-    });
+    _checkGameOverAndShowDialog();
   }
 
   void _checkForWord() {
@@ -293,13 +294,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
     // Check horizontal words first
     for (int row = 0; row < 10; row++) {
-      for (int len = 6; len >= 2; len--) {
+      for (int len = 10; len >= 2; len--) {
         for (int start = 0; start <= 10 - len; start++) {
           final slice = List<String?>.generate(
               len, (index) => placedLetters[row * 10 + start + index]);
           if (slice.any((letter) => letter == null)) continue;
           final word = slice.join().toLowerCase();
-          if (dictionary.contains(word)) {
+          if (_isAcceptedWord(word)) {
             if (madeWords.contains(word)) {
               if (!shownDuplicateDialog.contains(word)) {
                 shownDuplicateDialog.add(word);
@@ -324,13 +325,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
     // Check vertical words
     for (int col = 0; col < 10; col++) {
-      for (int len = 6; len >= 2; len--) {
+      for (int len = 10; len >= 2; len--) {
         for (int start = 0; start <= 10 - len; start++) {
           final slice = List<String?>.generate(
               len, (index) => placedLetters[(start + index) * 10 + col]);
           if (slice.any((letter) => letter == null)) continue;
           final word = slice.join().toLowerCase();
-          if (dictionary.contains(word)) {
+          if (_isAcceptedWord(word)) {
             if (madeWords.contains(word)) {
               if (!shownDuplicateDialog.contains(word)) {
                 shownDuplicateDialog.add(word);
