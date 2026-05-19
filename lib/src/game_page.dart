@@ -1,4 +1,4 @@
-﻿import 'dart:math';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'trajectory_painter.dart';
@@ -108,7 +108,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     }
   }
 
-  void _generateBalls() {
+  String _getRandomLetter() {
     final weightedLetters = <String>[];
     // Very common letters (x4)
     const veryCommon = [
@@ -144,10 +144,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       weightedLetters.addAll(List.filled(4, vowel));
     }
     final random = Random();
-    availableBalls = List.generate(12, (_) {
-      final letter = weightedLetters[random.nextInt(weightedLetters.length)];
-      return letter;
-    });
+    return weightedLetters[random.nextInt(weightedLetters.length)];
+  }
+
+  void _generateBalls() {
+    availableBalls = List.generate(12, (_) => _getRandomLetter());
   }
 
   void _resetGame() {
@@ -250,6 +251,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     }
 
     final letter = availableBalls.removeAt(selectedBallIndex);
+    availableBalls.add(_getRandomLetter());
     selectedBallIndex = -1;
     isAnimating = true;
     setState(() {
